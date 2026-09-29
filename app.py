@@ -31,41 +31,26 @@ async def edit_video(
     with open(input_file, "wb") as f:
         f.write(await video.read())
 
-    # Filtros normais
-    video_filters = []
+    filters = []
 
     if zoom > 1:
-        video_filters.append(
+        filters.append(
             f"scale=iw*{zoom}:ih*{zoom},"
             f"crop=iw/{zoom}:ih/{zoom}"
         )
 
-    video_filters.append(
+    filters.append(
         f"eq=brightness={brightness}:contrast={contrast}"
     )
 
-    normal_filter = ",".join(video_filters)
+    normal_filter = ",".join(filters)
 
-    if reverse:
-        # Reverse estilo edit:
-        # NORMAL -> REVERSE RÁPIDO -> NORMAL -> REVERSE RÁPIDO
-        filter_complex = (
-            f"[0:v]{normal_filter},split=4[v1][v2][v3][v4];"
-            f"[v2]reverse,setpts=0.35*PTS[vr1];"
-            f"[v4]reverse,setpts=0.35*PTS[vr2];"
-            f"[0:a]asplit=4[a1][a2][a3][a4];"
-            f"[a2]areverse,atempo=2,atempo=1.428571[a2r];"
-            f"[a4]areverse,atempo=2,atempo=1.428571[a4r];"
-            f"[v1][a1][vr1][a2r][v3][a3][vr2][a4r]"
-            f"concat=n=4:v=1:a=1[outv][outa]"
-        )
-
+    # VÍDEO NORMAL
+    if not reverse:
         command = [
             "ffmpeg",
             "-i", input_file,
-            "-filter_complex", filter_complex,
-            "-map", "[outv]",
-            "-map", "[outa]",
+            "-vf", normal_filter,
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
             "-profile:v", "main",
@@ -78,20 +63,24 @@ async def edit_video(
             output_file
         ]
 
+    # REVERSE
     else:
-        # Edição normal sem reverse
-        filter_complex = normal_filter
+        filter_complex = (
+            f"[0:v]{normal_filter},split=2[v1][v2];"
+            f"[v2]reverse,setpts=0.5*PTS[vr];"
+            f"[v1][vr]concat=n=2:v=1:a=0[outv]"
+        )
 
         command = [
             "ffmpeg",
             "-i", input_file,
-            "-vf", filter_complex,
+            "-filter_complex", filter_complex,
+            "-map", "[outv]",
+            "-an",
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
             "-profile:v", "main",
             "-level", "4.0",
-            "-c:a", "aac",
-            "-b:a", "128k",
             "-movflags", "+faststart",
             "-preset", "fast",
             "-y",
