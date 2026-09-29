@@ -1,3 +1,20 @@
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import FileResponse
+import uuid
+import subprocess
+import os
+
+app = FastAPI()
+
+os.makedirs("uploads", exist_ok=True)
+os.makedirs("outputs", exist_ok=True)
+
+
+@app.get("/")
+def home():
+    return {"status": "API funcionando"}
+
+
 @app.post("/edit")
 async def edit_video(
     video: UploadFile = File(...),
