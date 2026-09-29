@@ -31,38 +31,72 @@ async def edit_video(
     with open(input_file, "wb") as f:
         f.write(await video.read())
 
-    filters = []
+    # Filtros normais
+    video_filters = []
 
     if zoom > 1:
-        filters.append(
+        video_filters.append(
             f"scale=iw*{zoom}:ih*{zoom},"
             f"crop=iw/{zoom}:ih/{zoom}"
         )
 
-    filters.append(
+    video_filters.append(
         f"eq=brightness={brightness}:contrast={contrast}"
     )
 
+    normal_filter = ",".join(video_filters)
+
     if reverse:
-        filters.append("reverse")
+        # Reverse estilo edit:
+        # NORMAL -> REVERSE RÁPIDO -> NORMAL -> REVERSE RÁPIDO
+        filter_complex = (
+            f"[0:v]{normal_filter},split=4[v1][v2][v3][v4];"
+            f"[v2]reverse,setpts=0.35*PTS[vr1];"
+            f"[v4]reverse,setpts=0.35*PTS[vr2];"
+            f"[0:a]asplit=4[a1][a2][a3][a4];"
+            f"[a2]areverse,atempo=2,atempo=1.428571[a2r];"
+            f"[a4]areverse,atempo=2,atempo=1.428571[a4r];"
+            f"[v1][a1][vr1][a2r][v3][a3][vr2][a4r]"
+            f"concat=n=4:v=1:a=1[outv][outa]"
+        )
 
-    filter_complex = ",".join(filters)
+        command = [
+            "ffmpeg",
+            "-i", input_file,
+            "-filter_complex", filter_complex,
+            "-map", "[outv]",
+            "-map", "[outa]",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-profile:v", "main",
+            "-level", "4.0",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
+            "-preset", "fast",
+            "-y",
+            output_file
+        ]
 
-    command = [
-        "ffmpeg",
-        "-i", input_file,
-        "-vf", filter_complex,
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-profile:v", "main",
-        "-level", "4.0",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-movflags", "+faststart",
-        "-preset", "fast",
-        "-y",
-        output_file
-    ]
+    else:
+        # Edição normal sem reverse
+        filter_complex = normal_filter
+
+        command = [
+            "ffmpeg",
+            "-i", input_file,
+            "-vf", filter_complex,
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-profile:v", "main",
+            "-level", "4.0",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
+            "-preset", "fast",
+            "-y",
+            output_file
+        ]
 
     subprocess.run(command, check=True)
 
