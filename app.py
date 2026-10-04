@@ -31,10 +31,6 @@ async def edit_video(
     with open(input_file, "wb") as f:
         f.write(await video.read())
 
-    # ==============================
-    # FILTROS NORMAIS
-    # ==============================
-
     filters = []
 
     if zoom > 1:
@@ -49,9 +45,9 @@ async def edit_video(
 
     normal_filter = ",".join(filters)
 
-    # ==============================
+    # ==========================================
     # VÍDEO NORMAL
-    # ==============================
+    # ==========================================
 
     if not reverse:
 
@@ -79,13 +75,13 @@ async def edit_video(
             output_file
         ]
 
-    # ==============================
-    # REVERSE ESTILO EDIT
-    # ==============================
+    # ==========================================
+    # REVERSE ESTILO DA EDIT
+    # ==========================================
 
     else:
 
-        # Descobre a duração original
+        # Descobre a duração
         probe = subprocess.run(
             [
                 "ffprobe",
@@ -101,29 +97,40 @@ async def edit_video(
 
         duration = float(probe.stdout.strip())
 
-        # A cada 2 segundos acontece um micro-reverse
-        INTERVAL = 2.0
+        # Padrão encontrado na referência:
+        #
+        # NORMAL CURTO
+        #       ↓
+        # REVERSE ~0,6s
+        #       ↓
+        # NORMAL CURTO
+        #       ↓
+        # REVERSE ~0,6s
+        #
+        # repetindo aproximadamente a cada 0,67s.
 
-        # Quantos segundos serão usados para o rewind
-        REVERSE_SOURCE = 0.4
-
-        # O rewind aparece em apenas 0.2 segundo
-        # = aproximadamente 2x mais rápido
-        REVERSE_DURATION = 0.2
+        STEP = 0.6666667
+        NORMAL_PART = 0.0666667
 
         parts = []
+        labels = []
 
         start = 0.0
         index = 0
 
         while start < duration - 0.001:
 
-            end = min(start + INTERVAL, duration)
+            end = min(start + STEP, duration)
+
+            middle = min(
+                start + NORMAL_PART,
+                end
+            )
 
             chunk_duration = end - start
 
-            # Último trecho muito pequeno
-            if chunk_duration <= REVERSE_SOURCE:
+            # Último pedaço muito pequeno
+            if chunk_duration <= NORMAL_PART:
 
                 parts.append(
                     f"[0:v]"
@@ -135,61 +142,51 @@ async def edit_video(
 
             else:
 
-                # ==========================
-                # PARTE NORMAL
-                # ==========================
-
-                normal_end = end - REVERSE_DURATION
+                # --------------------------
+                # PEQUENO TRECHO NORMAL
+                # --------------------------
 
                 parts.append(
                     f"[0:v]"
                     f"{normal_filter},"
-                    f"trim=start={start}:end={normal_end},"
+                    f"trim=start={start}:end={middle},"
                     f"setpts=PTS-STARTPTS"
-                    f"[n{index}]"
+                    f"[normal{index}]"
                 )
 
-                # ==========================
-                # PARTE REVERSE
-                # ==========================
-
-                reverse_start = end - REVERSE_SOURCE
+                # --------------------------
+                # TRECHO REVERSE
+                # --------------------------
 
                 parts.append(
                     f"[0:v]"
                     f"{normal_filter},"
-                    f"trim=start={reverse_start}:end={end},"
+                    f"trim=start={middle}:end={end},"
                     f"setpts=PTS-STARTPTS,"
-                    f"reverse,"
-                    f"setpts=0.5*PTS"
-                    f"[r{index}]"
+                    f"reverse"
+                    f"[reverse{index}]"
                 )
 
-                # ==========================
-                # NORMAL + REVERSE
-                # ==========================
+                # --------------------------
+                # JUNTA NORMAL + REVERSE
+                # --------------------------
 
                 parts.append(
-                    f"[n{index}][r{index}]"
+                    f"[normal{index}]"
+                    f"[reverse{index}]"
                     f"concat=n=2:v=1:a=0"
                     f"[v{index}]"
                 )
 
+            labels.append(f"[v{index}]")
+
             start = end
             index += 1
 
-        # ==============================
-        # JUNTA TODOS OS TRECHOS
-        # ==============================
-
-        inputs = "".join(
-            f"[v{i}]"
-            for i in range(index)
-        )
-
+        # Junta todos os pedaços
         parts.append(
-            f"{inputs}"
-            f"concat=n={index}:v=1:a=0"
+            "".join(labels) +
+            f"concat=n={len(labels)}:v=1:a=0"
             f"[outv]"
         )
 
