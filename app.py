@@ -31,7 +31,10 @@ async def edit_video(
     with open(input_file, "wb") as f:
         f.write(await video.read())
 
-    # Filtros normais
+    # ==============================
+    # FILTROS NORMAIS
+    # ==============================
+
     filters = []
 
     if zoom > 1:
@@ -46,35 +49,43 @@ async def edit_video(
 
     normal_filter = ",".join(filters)
 
-    # =========================================================
+    # ==============================
     # VÍDEO NORMAL
-    # =========================================================
+    # ==============================
+
     if not reverse:
 
         command = [
             "ffmpeg",
             "-i", input_file,
+
             "-vf", normal_filter,
+
             "-map", "0:v:0",
             "-map", "0:a?",
+
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
             "-profile:v", "main",
             "-level", "4.0",
+
             "-c:a", "aac",
             "-b:a", "128k",
+
             "-movflags", "+faststart",
             "-preset", "fast",
+
             "-y",
             output_file
         ]
 
-    # =========================================================
+    # ==============================
     # REVERSE ESTILO EDIT
-    # =========================================================
+    # ==============================
+
     else:
 
-        # Descobre a duração do vídeo
+        # Descobre a duração original
         probe = subprocess.run(
             [
                 "ffprobe",
@@ -90,74 +101,96 @@ async def edit_video(
 
         duration = float(probe.stdout.strip())
 
-        # A cada 2 segundos:
-        # normal -> reverse rápido
+        # A cada 2 segundos acontece um micro-reverse
         INTERVAL = 2.0
 
-        # Trecho usado para o reverse
-        REVERSE_SOURCE = 0.6
+        # Quantos segundos serão usados para o rewind
+        REVERSE_SOURCE = 0.4
 
-        # O reverse fica 2x mais rápido
-        REVERSE_SPEED = 2.0
+        # O rewind aparece em apenas 0.2 segundo
+        # = aproximadamente 2x mais rápido
+        REVERSE_DURATION = 0.2
 
         parts = []
 
         start = 0.0
         index = 0
 
-        while start < duration - 0.01:
+        while start < duration - 0.001:
 
             end = min(start + INTERVAL, duration)
-            length = end - start
 
-            # Vídeos muito curtos
-            if length <= 0.7:
+            chunk_duration = end - start
+
+            # Último trecho muito pequeno
+            if chunk_duration <= REVERSE_SOURCE:
 
                 parts.append(
-                    f"[0:v]{normal_filter},"
+                    f"[0:v]"
+                    f"{normal_filter},"
                     f"trim=start={start}:end={end},"
-                    f"setpts=PTS-STARTPTS[v{index}]"
+                    f"setpts=PTS-STARTPTS"
+                    f"[v{index}]"
                 )
 
             else:
 
-                # Parte normal
-                normal_end = max(start, end - 0.3)
+                # ==========================
+                # PARTE NORMAL
+                # ==========================
+
+                normal_end = end - REVERSE_DURATION
 
                 parts.append(
-                    f"[0:v]{normal_filter},"
+                    f"[0:v]"
+                    f"{normal_filter},"
                     f"trim=start={start}:end={normal_end},"
-                    f"setpts=PTS-STARTPTS[n{index}]"
+                    f"setpts=PTS-STARTPTS"
+                    f"[n{index}]"
                 )
 
-                # Últimos 0.6 segundos são invertidos
-                reverse_start = max(start, end - REVERSE_SOURCE)
+                # ==========================
+                # PARTE REVERSE
+                # ==========================
+
+                reverse_start = end - REVERSE_SOURCE
 
                 parts.append(
-                    f"[0:v]{normal_filter},"
+                    f"[0:v]"
+                    f"{normal_filter},"
                     f"trim=start={reverse_start}:end={end},"
                     f"setpts=PTS-STARTPTS,"
                     f"reverse,"
-                    f"setpts=PTS/{REVERSE_SPEED}[r{index}]"
+                    f"setpts=0.5*PTS"
+                    f"[r{index}]"
                 )
 
-                # Junta normal + reverse rápido
+                # ==========================
+                # NORMAL + REVERSE
+                # ==========================
+
                 parts.append(
                     f"[n{index}][r{index}]"
-                    f"concat=n=2:v=1:a=0[v{index}]"
+                    f"concat=n=2:v=1:a=0"
+                    f"[v{index}]"
                 )
 
-            start += INTERVAL
+            start = end
             index += 1
 
-        # Junta todos os pedaços
-        video_inputs = "".join(
-            f"[v{i}]" for i in range(index)
+        # ==============================
+        # JUNTA TODOS OS TRECHOS
+        # ==============================
+
+        inputs = "".join(
+            f"[v{i}]"
+            for i in range(index)
         )
 
         parts.append(
-            f"{video_inputs}"
-            f"concat=n={index}:v=1:a=0[outv]"
+            f"{inputs}"
+            f"concat=n={index}:v=1:a=0"
+            f"[outv]"
         )
 
         filter_complex = ";".join(parts)
