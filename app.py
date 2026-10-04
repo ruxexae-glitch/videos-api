@@ -45,9 +45,9 @@ async def edit_video(
 
     normal_filter = ",".join(filters)
 
-    # ==========================================
-    # VÍDEO NORMAL
-    # ==========================================
+    # ==================================================
+    # MODO NORMAL
+    # ==================================================
 
     if not reverse:
 
@@ -75,13 +75,13 @@ async def edit_video(
             output_file
         ]
 
-    # ==========================================
-    # REVERSE ESTILO DA EDIT
-    # ==========================================
+    # ==================================================
+    # REVERSE ESTILO EDIT
+    # ==================================================
 
     else:
 
-        # Descobre a duração
+        # Descobre duração
         probe = subprocess.run(
             [
                 "ffprobe",
@@ -97,20 +97,9 @@ async def edit_video(
 
         duration = float(probe.stdout.strip())
 
-        # Padrão encontrado na referência:
-        #
-        # NORMAL CURTO
-        #       ↓
-        # REVERSE ~0,6s
-        #       ↓
-        # NORMAL CURTO
-        #       ↓
-        # REVERSE ~0,6s
-        #
-        # repetindo aproximadamente a cada 0,67s.
-
-        STEP = 0.6666667
-        NORMAL_PART = 0.0666667
+        # Tamanho de cada "puxada"
+        # 0.33s normal + 0.33s voltando
+        STEP = 0.33
 
         parts = []
         labels = []
@@ -122,68 +111,47 @@ async def edit_video(
 
             end = min(start + STEP, duration)
 
-            middle = min(
-                start + NORMAL_PART,
-                end
+            # ==========================================
+            # TRECHO NORMAL
+            # ==========================================
+
+            parts.append(
+                f"[0:v]"
+                f"{normal_filter},"
+                f"trim=start={start}:end={end},"
+                f"setpts=PTS-STARTPTS"
+                f"[f{index}]"
             )
 
-            chunk_duration = end - start
+            # ==========================================
+            # MESMO TRECHO AO CONTRÁRIO
+            # ==========================================
 
-            # Último pedaço muito pequeno
-            if chunk_duration <= NORMAL_PART:
+            parts.append(
+                f"[0:v]"
+                f"{normal_filter},"
+                f"trim=start={start}:end={end},"
+                f"setpts=PTS-STARTPTS,"
+                f"reverse"
+                f"[r{index}]"
+            )
 
-                parts.append(
-                    f"[0:v]"
-                    f"{normal_filter},"
-                    f"trim=start={start}:end={end},"
-                    f"setpts=PTS-STARTPTS"
-                    f"[v{index}]"
-                )
+            # ==========================================
+            # NORMAL + REVERSE
+            # ==========================================
 
-            else:
-
-                # --------------------------
-                # PEQUENO TRECHO NORMAL
-                # --------------------------
-
-                parts.append(
-                    f"[0:v]"
-                    f"{normal_filter},"
-                    f"trim=start={start}:end={middle},"
-                    f"setpts=PTS-STARTPTS"
-                    f"[normal{index}]"
-                )
-
-                # --------------------------
-                # TRECHO REVERSE
-                # --------------------------
-
-                parts.append(
-                    f"[0:v]"
-                    f"{normal_filter},"
-                    f"trim=start={middle}:end={end},"
-                    f"setpts=PTS-STARTPTS,"
-                    f"reverse"
-                    f"[reverse{index}]"
-                )
-
-                # --------------------------
-                # JUNTA NORMAL + REVERSE
-                # --------------------------
-
-                parts.append(
-                    f"[normal{index}]"
-                    f"[reverse{index}]"
-                    f"concat=n=2:v=1:a=0"
-                    f"[v{index}]"
-                )
+            parts.append(
+                f"[f{index}][r{index}]"
+                f"concat=n=2:v=1:a=0"
+                f"[v{index}]"
+            )
 
             labels.append(f"[v{index}]")
 
             start = end
             index += 1
 
-        # Junta todos os pedaços
+        # Junta todos os ciclos
         parts.append(
             "".join(labels) +
             f"concat=n={len(labels)}:v=1:a=0"
@@ -199,20 +167,16 @@ async def edit_video(
             "-filter_complex", filter_complex,
 
             "-map", "[outv]",
-            "-map", "0:a?",
+            "-an",
 
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
             "-profile:v", "main",
             "-level", "4.0",
 
-            "-c:a", "aac",
-            "-b:a", "128k",
-
             "-movflags", "+faststart",
             "-preset", "fast",
 
-            "-shortest",
             "-y",
             output_file
         ]
@@ -224,3 +188,5 @@ async def edit_video(
         media_type="video/mp4",
         filename="video_editado.mp4"
     )
+ 
+            
